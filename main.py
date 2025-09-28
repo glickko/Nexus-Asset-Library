@@ -1,6 +1,6 @@
-# Nexus Protocol: Media Asset Nexus v2.9
+# Nexus Protocol: Media Asset Nexus v2.7
 # A synergistic Python application for managing and processing media assets.
-# Evolved with a persistent volume slider and robust UI icons.
+# Evolved with intelligent thumbnailing and a fully synchronized trimming UI.
 
 import sys
 import os
@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QFrame, QTreeView, QPushButton,
     QLabel, QFileDialog, QListWidget, QListWidgetItem, QInputDialog,
-    QStyle, QMessageBox, QLineEdit, QCheckBox, QSlider
+    QStyle, QMessageBox, QLineEdit, QCheckBox
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -282,48 +282,28 @@ class MainWindow(QMainWindow):
         self.cache_dir = self.setup_cache_directory()
         self.thumb_cache_dir = self.setup_cache_directory("thumbnails")
         self.config_path = os.path.join(pathlib.Path(__file__).parent, "nexus_config.json")
-        
-        self.config = self.load_config()
-        self.library_paths = self.config.get("library_paths", [])
-        self.library_view_mode = self.config.get("library_view_mode", "thumbnails")
-        self.cache_view_mode = self.config.get("cache_view_mode", "thumbnails")
-        self.volume = self.config.get("volume", 100)
-
+        self.library_paths = self.load_config()
         self.start_time_ms = 0
         self.end_time_ms = 0
         self.thumbnail_workers = []
         self.was_playing_before_drag = False
 
         self.setup_ui()
-        self.audio_output.setVolume(self.volume / 100.0)
         self.populate_libraries()
         self.load_cache()
-        self.apply_view_modes()
         
         if not self.ffmpeg_path: self.show_ffmpeg_warning()
 
     def load_config(self):
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
-                try:
-                    data = json.load(f)
-                    # Handle legacy config which was just a list of paths
-                    if isinstance(data, list):
-                        return {"library_paths": data, "library_view_mode": "thumbnails", "cache_view_mode": "thumbnails", "volume": 100}
-                    return data if isinstance(data, dict) else {}
-                except json.JSONDecodeError:
-                    return {}  # Return empty dict if config is corrupt
-        return {} # Return empty dict if file doesn't exist
+                try: return json.load(f)
+                except json.JSONDecodeError: return []
+        return []
 
     def save_config(self):
-        config_data = {
-            "library_paths": self.library_paths,
-            "library_view_mode": self.library_view_mode,
-            "cache_view_mode": self.cache_view_mode,
-            "volume": self.volume
-        }
         with open(self.config_path, 'w') as f:
-            json.dump(config_data, f, indent=4)
+            json.dump(self.library_paths, f, indent=4)
 
     def setup_cache_directory(self, subfolder=""):
         cache_path = pathlib.Path(__file__).parent / "nexus_cache" / subfolder
@@ -353,24 +333,14 @@ class MainWindow(QMainWindow):
         explorer_frame.setFrameShape(QFrame.StyledPanel)
         explorer_layout = QVBoxLayout(explorer_frame)
         
-        library_top_controls = QHBoxLayout()
+        library_controls = QHBoxLayout()
         btn_add_library = QPushButton("Add Library")
         btn_add_library.clicked.connect(self.add_library)
         btn_remove_library = QPushButton("Remove Library")
         btn_remove_library.clicked.connect(self.remove_library)
-        library_top_controls.addWidget(btn_add_library)
-        library_top_controls.addWidget(btn_remove_library)
-        library_top_controls.addStretch()
-
-        btn_lib_details = QPushButton()
-        btn_lib_details.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        btn_lib_details.clicked.connect(lambda: self.set_library_view_mode("details"))
-        btn_lib_thumbs = QPushButton()
-        btn_lib_thumbs.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIconView))
-        btn_lib_thumbs.clicked.connect(lambda: self.set_library_view_mode("thumbnails"))
-        library_top_controls.addWidget(btn_lib_details)
-        library_top_controls.addWidget(btn_lib_thumbs)
-        explorer_layout.addLayout(library_top_controls)
+        library_controls.addWidget(btn_add_library)
+        library_controls.addWidget(btn_remove_library)
+        explorer_layout.addLayout(library_controls)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search assets...")
@@ -388,6 +358,7 @@ class MainWindow(QMainWindow):
         self.tree_view = QTreeView()
         self.tree_view.setModel(self.proxy_model)
         self.tree_view.doubleClicked.connect(self.on_file_selected)
+        self.tree_view.setIconSize(QSize(64, 64))
         self.tree_view.setColumnWidth(0, 250)
         self.tree_view.setAnimated(True)
         self.tree_view.setIndentation(20)
@@ -400,7 +371,7 @@ class MainWindow(QMainWindow):
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
-        
+        self.audio_output.setVolume(1.0)
         self.video_widget = QVideoWidget()
         self.media_player.setVideoOutput(self.video_widget)
         self.lbl_media_name = QLabel("No Media Loaded")
@@ -425,19 +396,10 @@ class MainWindow(QMainWindow):
         self.position_slider.sliderPressed.connect(self.on_slider_pressed)
         self.position_slider.sliderReleased.connect(self.on_slider_released)
 
-        volume_icon = QLabel()
-        volume_icon.setPixmap(self.style().standardIcon(QStyle.SP_MediaVolume).pixmap(QSize(24, 24)))
-        self.volume_slider = QSlider(Qt.Horizontal)
-        self.volume_slider.setRange(0, 100)
-        self.volume_slider.setValue(self.volume)
-        self.volume_slider.setFixedWidth(150)
-        self.volume_slider.valueChanged.connect(self.set_volume)
-
+        
         playback_layout.addWidget(self.btn_play)
         playback_layout.addWidget(self.loop_checkbox)
-        playback_layout.addWidget(self.position_slider, 1)
-        playback_layout.addWidget(volume_icon)
-        playback_layout.addWidget(self.volume_slider)
+        playback_layout.addWidget(self.position_slider)
 
         trim_controls_frame = QFrame()
         trim_controls_frame.setObjectName("TrimFrame")
@@ -483,64 +445,27 @@ class MainWindow(QMainWindow):
         cache_frame = QFrame()
         cache_frame.setFrameShape(QFrame.StyledPanel)
         cache_layout = QVBoxLayout(cache_frame)
-        
-        cache_top_controls = QHBoxLayout()
-        cache_top_controls.addWidget(QLabel("Processed Cache"))
-        cache_top_controls.addStretch()
-        btn_cache_details = QPushButton()
-        btn_cache_details.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_FileDialogDetailedView))
-        btn_cache_details.clicked.connect(lambda: self.set_cache_view_mode("details"))
-        btn_cache_thumbs = QPushButton()
-        btn_cache_thumbs.setIcon(self.style().standardIcon(QStyle.StandardPixmap.SP_DirIconView))
-        btn_cache_thumbs.clicked.connect(lambda: self.set_cache_view_mode("thumbnails"))
-        cache_top_controls.addWidget(btn_cache_details)
-        cache_top_controls.addWidget(btn_cache_thumbs)
-        cache_layout.addLayout(cache_top_controls)
-
+        cache_layout.addWidget(QLabel("Processed Cache"))
         self.cache_list = DraggableListWidget()
         self.cache_list.itemSelectionChanged.connect(self.on_cache_selection_changed)
         self.cache_list.itemDoubleClicked.connect(self.on_cache_item_selected)
         
-        cache_bottom_controls = QHBoxLayout()
+        cache_controls_layout = QHBoxLayout()
         self.btn_rename_cache = QPushButton("Rename")
         self.btn_rename_cache.clicked.connect(self.rename_cache_item)
         self.btn_delete_cache = QPushButton("Delete")
         self.btn_delete_cache.clicked.connect(self.delete_cache_item)
-        cache_bottom_controls.addWidget(self.btn_rename_cache)
-        cache_bottom_controls.addWidget(self.btn_delete_cache)
+        cache_controls_layout.addWidget(self.btn_rename_cache)
+        cache_controls_layout.addWidget(self.btn_delete_cache)
         
         cache_layout.addWidget(self.cache_list)
-        cache_layout.addLayout(cache_bottom_controls)
+        cache_layout.addLayout(cache_controls_layout)
 
         main_splitter.addWidget(explorer_frame)
         main_splitter.addWidget(viewer_frame)
         main_splitter.addWidget(cache_frame)
         main_splitter.setSizes([350, 750, 300])
         self.on_cache_selection_changed() # Set initial state
-
-    # --- View Mode Management ---
-    def apply_view_modes(self):
-        self.set_library_view_mode(self.library_view_mode, save=False)
-        self.set_cache_view_mode(self.cache_view_mode, save=False)
-
-    def set_library_view_mode(self, mode, save=True):
-        self.library_view_mode = mode
-        if mode == "details":
-            self.tree_view.setIconSize(QSize(24, 24))
-        else: # thumbnails
-            self.tree_view.setIconSize(QSize(64, 64))
-        if save: self.save_config()
-
-    def set_cache_view_mode(self, mode, save=True):
-        self.cache_view_mode = mode
-        if mode == "details":
-            self.cache_list.setViewMode(QListWidget.ListMode)
-            self.cache_list.setIconSize(QSize(32, 32))
-        else: # thumbnails
-            self.cache_list.setViewMode(QListWidget.IconMode)
-            self.cache_list.setIconSize(QSize(128, 72))
-        if save: self.save_config()
-
 
     # --- Library Management ---
     def add_library(self):
@@ -833,15 +758,6 @@ class MainWindow(QMainWindow):
             self.media_player.setPosition(max(0, current_pos - frame_duration_ms))
         else:
             super().keyPressEvent(event)
-            
-    @Slot(int)
-    def set_volume(self, value):
-        self.volume = value
-        self.audio_output.setVolume(value / 100.0)
-
-    def closeEvent(self, event):
-        self.save_config()
-        super().closeEvent(event)
 
     def trim_media(self):
         if not self.current_media_path: return
@@ -904,26 +820,6 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; }
         QCheckBox::indicator:unchecked { background-color: #3c3f41; border: 1px solid #777777; }
         QCheckBox::indicator:checked { background-color: #007acc; border: 1px solid #005f9e; }
-        QSlider::groove:horizontal {
-            border: 1px solid #555555;
-            height: 4px;
-            background: #4f4f4f;
-            margin: 2px 0;
-            border-radius: 2px;
-        }
-        QSlider::handle:horizontal {
-            background: #dcdcdc;
-            border: 1px solid #555555;
-            width: 16px;
-            margin: -6px 0;
-            border-radius: 8px;
-        }
-        QSlider::sub-page:horizontal {
-            background: #007acc;
-            border: 1px solid #555555;
-            height: 4px;
-            border-radius: 2px;
-        }
         """
 # --- Application Entry Point ---
 if __name__ == '__main__':
