@@ -6,6 +6,10 @@ Your synergistic partner for rapid media trimming and asset management.
   <img src="https://raw.githubusercontent.com/glickko/XYZ-Asset-Fusion/refs/heads/main/ss.png" alt="XYZ Asset Fusion Screenshot" width="800">
   <br>
   <em>A screenshot of the XYZ Asset Fusion application in action.</em>
+  <br><br>
+  <a href="https://ko-fi.com/glickko" target="_blank">
+    <img height="36" style="border:0px;height:36px;" src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com" />
+  </a>
 </p>
 
 ---
@@ -17,7 +21,7 @@ XYZ Asset Fusion is designed to accelerate your editing workflow by making asset
 * **Central Asset Library:** Add all your project folders to view and manage your media files in one place.
 * **Real-time Visual Trimming:** Quickly select the perfect in and out points for your clips using a responsive timeline and live-preview looping.
 * **Effortless Drag & Drop Workflow:** Drag assets directly from the library or your trimmed clips from the cache into your favorite video editor (e.g., Premiere Pro, DaVinci Resolve, Vegas Pro).
-* **Instant Caching:** Save trimmed clips as new, ready-to-use files with a single click.
+* **Instant Caching:** Save trimmed clips as new, ready-to-use-files with a single click.
 * **Quick Search:** Instantly find the asset you need with a simple search filter.
 
 ## How to Use
@@ -32,3 +36,4 @@ The workflow is designed to be fast and simple, getting you from raw footage to 
     * The player will automatically loop your selection for a perfect real-time preview.
 4.  **Save to Cache:** Click the `Apply Trim and Cache` button. Your trimmed clip is immediately saved as a new file.
 5.  **Drag to Your Editor:** Your new clip will appear at the top of the "Processed Cache" list. **Simply drag it from this list and drop it directly into your video editor's timeline.**
+
