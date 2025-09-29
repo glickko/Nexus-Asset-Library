@@ -1,6 +1,6 @@
-# Nexus Protocol: Media Asset Nexus v2.7
+# Nexus Protocol: Media Asset Nexus v3.9
 # A synergistic Python application for managing and processing media assets.
-# Evolved with intelligent thumbnailing and a fully synchronized trimming UI.
+# Re-engineered with optimized, non-blocking library loading to ensure UI responsiveness.
 
 import sys
 import os
@@ -11,17 +11,17 @@ import re
 
 from PySide6.QtCore import (
     Qt, QUrl, QDir, QMimeData, QSize, QStandardPaths, Slot, QThread, Signal,
-    QSortFilterProxyModel, QPoint, QModelIndex, QRect, QTime, QTimer
+    QSortFilterProxyModel, QPoint, QModelIndex, QRect, QTime, QTimer, QFileSystemWatcher
 )
 from PySide6.QtGui import (
     QGuiApplication, QDrag, QPixmap, QPainter, QIcon, QFont, QRegion, QColor,
-    QPen, QStandardItemModel, QStandardItem, QBrush, QPainterPath
+    QPen, QStandardItemModel, QStandardItem, QBrush, QPainterPath, QAction
 )
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QSplitter, QFrame, QTreeView, QPushButton,
     QLabel, QFileDialog, QListWidget, QListWidgetItem, QInputDialog,
-    QStyle, QMessageBox, QLineEdit, QCheckBox
+    QStyle, QMessageBox, QLineEdit, QCheckBox, QSlider, QStatusBar, QMenu
 )
 from PySide6.QtMultimedia import QMediaPlayer, QAudioOutput
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -29,6 +29,7 @@ from PySide6.QtMultimediaWidgets import QVideoWidget
 # --- Worker Thread for Thumbnail Generation ---
 class ThumbnailGenerator(QThread):
     thumbnailReady = Signal(object, QIcon) # Pass back the item and the icon
+    errorOccurred = Signal(str)
 
     def __init__(self, item, media_path, thumb_path, ffmpeg_path, parent=None):
         super().__init__(parent)
@@ -52,8 +53,41 @@ class ThumbnailGenerator(QThread):
             if os.path.exists(self.thumb_path):
                 self.thumbnailReady.emit(self.item, QIcon(self.thumb_path))
         except Exception as e:
-            # Silently fail for audio files or errors, the placeholder icon will remain
-            print(f"Could not generate thumbnail for {self.media_path}: {e.stderr if hasattr(e, 'stderr') else e}")
+            error_message = f"Thumbnail failed for: {os.path.basename(self.media_path)}"
+            self.errorOccurred.emit(error_message)
+            print(f"{error_message}: {e.stderr if hasattr(e, 'stderr') else e}")
+
+# --- Worker Thread for Library Scanning ---
+class LibraryScanner(QThread):
+    directoryFound = Signal(str)
+    scanFinished = Signal(list) # Emits the full list of found items
+    errorOccurred = Signal(str)
+
+    def __init__(self, library_paths, parent=None):
+        super().__init__(parent)
+        self.library_paths = library_paths
+        self.results = []
+
+    def run(self):
+        for path in self.library_paths:
+            if os.path.isdir(path):
+                self.results.append((None, os.path.basename(path), path, True))
+                self.directoryFound.emit(path)
+                self._scan_directory(path)
+        self.scanFinished.emit(self.results)
+
+    def _scan_directory(self, parent_path):
+        try:
+            for entry in os.scandir(parent_path):
+                is_dir = entry.is_dir()
+                self.results.append((parent_path, entry.name, entry.path, is_dir))
+                if is_dir:
+                    self.directoryFound.emit(entry.path)
+                    self._scan_directory(entry.path)
+        except OSError as e:
+            error_message = f"Cannot access: {os.path.basename(parent_path)}"
+            self.errorOccurred.emit(error_message)
+            print(f"Error scanning directory {parent_path}: {e}")
 
 
 # --- Custom Proxy Model for Recursive Filtering ---
@@ -72,33 +106,82 @@ class RecursiveFilterProxyModel(QSortFilterProxyModel):
     def filter_accepts_row_itself(self, source_row, source_parent):
         return super().filterAcceptsRow(source_row, source_parent)
 
+# --- Draggable Tree View for Asset Library ---
+class DraggableTreeView(QTreeView):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragEnabled(True)
+
+    def startDrag(self, supportedActions):
+        index = self.currentIndex()
+        if not index.isValid():
+            return
+
+        # Map proxy index to source model index
+        source_model = self.model().sourceModel()
+        source_index = self.model().mapToSource(index)
+        
+        item = source_model.itemFromIndex(source_index)
+        if not item:
+            return
+
+        file_path = item.data(Qt.UserRole)
+        
+        # Ensure we only drag files, not directories
+        if file_path and os.path.isfile(file_path):
+            url = QUrl.fromLocalFile(file_path)
+            mime_data = QMimeData()
+            mime_data.setUrls([url])
+            
+            drag = QDrag(self)
+            drag.setMimeData(mime_data)
+            
+            # Create a representative pixmap for the drag using the render method
+            rect = self.visualRect(index)
+            pixmap = QPixmap(rect.size())
+            pixmap.fill(Qt.transparent)
+            painter = QPainter(pixmap)
+            self.render(painter, QPoint(), QRegion(rect))
+            painter.end()
+            
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
+            drag.exec(Qt.CopyAction)
+
 # --- Custom Widget for Draggable Cached Files ---
 class DraggableListWidget(QListWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setSelectionMode(QListWidget.SingleSelection)
-        self.setIconSize(QSize(128, 72))
-        self.setViewMode(QListWidget.IconMode)
+        self.setIconSize(QSize(48, 48))
+        self.setViewMode(QListWidget.ListMode)
         self.setResizeMode(QListWidget.Adjust)
         self.setWordWrap(True)
 
-
     def startDrag(self, supportedActions):
         item = self.currentItem()
-        if item:
+        if item and item.data(Qt.UserRole):
             file_path = item.data(Qt.UserRole)
-            if file_path:
+            if os.path.isfile(file_path):
                 url = QUrl.fromLocalFile(file_path)
                 mime_data = QMimeData()
                 mime_data.setUrls([url])
                 drag = QDrag(self)
                 drag.setMimeData(mime_data)
-                
-                pixmap = item.icon().pixmap(self.iconSize())
+
+                # Use the render method for a robust drag pixmap
+                rect = self.visualItemRect(item)
+                pixmap = QPixmap(rect.size())
+                pixmap.fill(Qt.transparent)
+                painter = QPainter(pixmap)
+                self.render(painter, QPoint(), QRegion(rect))
+                painter.end()
+
                 drag.setPixmap(pixmap)
                 drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
                 drag.exec(Qt.CopyAction)
+
 
 # --- Professional Trimming Slider ---
 class ProTrimSlider(QWidget):
@@ -107,6 +190,7 @@ class ProTrimSlider(QWidget):
     endMarkerChanged = Signal(int)
     sliderPressed = Signal()
     sliderReleased = Signal()
+    trimRangeChanged = Signal()
 
 
     def __init__(self, parent=None):
@@ -254,6 +338,8 @@ class ProTrimSlider(QWidget):
         self.update()
 
     def mouseReleaseEvent(self, event):
+        was_trim_drag = self._dragging in ['start', 'end']
+        
         if self._dragging == 'position':
             pos_x = self._value_to_pos(self._position)
             start_x = self._value_to_pos(self._start_marker)
@@ -264,6 +350,9 @@ class ProTrimSlider(QWidget):
         self._dragging = None
         self.update()
         self.sliderReleased.emit()
+        
+        if was_trim_drag:
+            self.trimRangeChanged.emit()
 
 # --- Main Application Window ---
 class MainWindow(QMainWindow):
@@ -282,13 +371,25 @@ class MainWindow(QMainWindow):
         self.cache_dir = self.setup_cache_directory()
         self.thumb_cache_dir = self.setup_cache_directory("thumbnails")
         self.config_path = os.path.join(pathlib.Path(__file__).parent, "nexus_config.json")
-        self.library_paths = self.load_config()
+        
+        self.config = self.load_config()
+        self.library_paths = self.config.get("library_paths", [])
+        self.volume = self.config.get("volume", 100)
+
         self.start_time_ms = 0
         self.end_time_ms = 0
         self.thumbnail_workers = []
+        self.library_scanner = None
+        self.path_to_item_map = {}
         self.was_playing_before_drag = False
+        self.file_watcher = QFileSystemWatcher(self)
+        self.refresh_timer = QTimer(self)
+        self.refresh_timer.setSingleShot(True)
+        self.refresh_timer.timeout.connect(self.populate_libraries)
+
 
         self.setup_ui()
+        self.audio_output.setVolume(self.volume / 100.0)
         self.populate_libraries()
         self.load_cache()
         
@@ -297,13 +398,25 @@ class MainWindow(QMainWindow):
     def load_config(self):
         if os.path.exists(self.config_path):
             with open(self.config_path, 'r') as f:
-                try: return json.load(f)
-                except json.JSONDecodeError: return []
-        return []
+                try:
+                    data = json.load(f)
+                    # Handle legacy config which was just a list of paths or dict without volume
+                    if isinstance(data, list):
+                        return {"library_paths": data, "volume": 100}
+                    if "volume" not in data:
+                        data["volume"] = 100
+                    return data if isinstance(data, dict) else {}
+                except json.JSONDecodeError:
+                    return {}  # Return empty dict if config is corrupt
+        return {} # Return empty dict if file doesn't exist
 
     def save_config(self):
+        config_data = {
+            "library_paths": self.library_paths,
+            "volume": self.volume
+        }
         with open(self.config_path, 'w') as f:
-            json.dump(self.library_paths, f, indent=4)
+            json.dump(config_data, f, indent=4)
 
     def setup_cache_directory(self, subfolder=""):
         cache_path = pathlib.Path(__file__).parent / "nexus_cache" / subfolder
@@ -333,14 +446,14 @@ class MainWindow(QMainWindow):
         explorer_frame.setFrameShape(QFrame.StyledPanel)
         explorer_layout = QVBoxLayout(explorer_frame)
         
-        library_controls = QHBoxLayout()
-        btn_add_library = QPushButton("Add Library")
-        btn_add_library.clicked.connect(self.add_library)
-        btn_remove_library = QPushButton("Remove Library")
-        btn_remove_library.clicked.connect(self.remove_library)
-        library_controls.addWidget(btn_add_library)
-        library_controls.addWidget(btn_remove_library)
-        explorer_layout.addLayout(library_controls)
+        library_top_controls = QHBoxLayout()
+        self.btn_add_library = QPushButton("Add Library")
+        self.btn_add_library.clicked.connect(self.add_library)
+        self.btn_remove_library = QPushButton("Remove Library")
+        self.btn_remove_library.clicked.connect(self.remove_library)
+        library_top_controls.addWidget(self.btn_add_library)
+        library_top_controls.addWidget(self.btn_remove_library)
+        explorer_layout.addLayout(library_top_controls)
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search assets...")
@@ -353,15 +466,15 @@ class MainWindow(QMainWindow):
         self.proxy_model = RecursiveFilterProxyModel()
         self.proxy_model.setSourceModel(self.library_model)
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
-        self.proxy_model.setRecursiveFilteringEnabled(True)
-
-        self.tree_view = QTreeView()
+        
+        self.tree_view = DraggableTreeView()
         self.tree_view.setModel(self.proxy_model)
         self.tree_view.doubleClicked.connect(self.on_file_selected)
-        self.tree_view.setIconSize(QSize(64, 64))
+        self.tree_view.setIconSize(QSize(32, 32))
         self.tree_view.setColumnWidth(0, 250)
         self.tree_view.setAnimated(True)
         self.tree_view.setIndentation(20)
+        self.tree_view.setSortingEnabled(True)
         explorer_layout.addWidget(self.tree_view)
         
         # --- Center Pane: Media Viewer and Trimmer ---
@@ -371,7 +484,7 @@ class MainWindow(QMainWindow):
         self.media_player = QMediaPlayer()
         self.audio_output = QAudioOutput()
         self.media_player.setAudioOutput(self.audio_output)
-        self.audio_output.setVolume(1.0)
+        
         self.video_widget = QVideoWidget()
         self.media_player.setVideoOutput(self.video_widget)
         self.lbl_media_name = QLabel("No Media Loaded")
@@ -395,11 +508,21 @@ class MainWindow(QMainWindow):
         self.position_slider.endMarkerChanged.connect(self.set_end_time_from_slider)
         self.position_slider.sliderPressed.connect(self.on_slider_pressed)
         self.position_slider.sliderReleased.connect(self.on_slider_released)
+        self.position_slider.trimRangeChanged.connect(self.on_trim_range_changed)
 
-        
+        volume_icon = QLabel()
+        volume_icon.setPixmap(self.style().standardIcon(QStyle.SP_MediaVolume).pixmap(QSize(24, 24)))
+        self.volume_slider = QSlider(Qt.Horizontal)
+        self.volume_slider.setRange(0, 100)
+        self.volume_slider.setValue(self.volume)
+        self.volume_slider.setFixedWidth(150)
+        self.volume_slider.valueChanged.connect(self.set_volume)
+
         playback_layout.addWidget(self.btn_play)
         playback_layout.addWidget(self.loop_checkbox)
-        playback_layout.addWidget(self.position_slider)
+        playback_layout.addWidget(self.position_slider, 1)
+        playback_layout.addWidget(volume_icon)
+        playback_layout.addWidget(self.volume_slider)
 
         trim_controls_frame = QFrame()
         trim_controls_frame.setObjectName("TrimFrame")
@@ -445,27 +568,34 @@ class MainWindow(QMainWindow):
         cache_frame = QFrame()
         cache_frame.setFrameShape(QFrame.StyledPanel)
         cache_layout = QVBoxLayout(cache_frame)
-        cache_layout.addWidget(QLabel("Processed Cache"))
+        
+        cache_top_controls = QHBoxLayout()
+        cache_top_controls.addWidget(QLabel("Processed Cache"))
+        cache_layout.addLayout(cache_top_controls)
+
         self.cache_list = DraggableListWidget()
         self.cache_list.itemSelectionChanged.connect(self.on_cache_selection_changed)
         self.cache_list.itemDoubleClicked.connect(self.on_cache_item_selected)
         
-        cache_controls_layout = QHBoxLayout()
+        cache_bottom_controls = QHBoxLayout()
         self.btn_rename_cache = QPushButton("Rename")
         self.btn_rename_cache.clicked.connect(self.rename_cache_item)
         self.btn_delete_cache = QPushButton("Delete")
         self.btn_delete_cache.clicked.connect(self.delete_cache_item)
-        cache_controls_layout.addWidget(self.btn_rename_cache)
-        cache_controls_layout.addWidget(self.btn_delete_cache)
+        cache_bottom_controls.addWidget(self.btn_rename_cache)
+        cache_bottom_controls.addWidget(self.btn_delete_cache)
         
         cache_layout.addWidget(self.cache_list)
-        cache_layout.addLayout(cache_controls_layout)
+        cache_layout.addLayout(cache_bottom_controls)
 
         main_splitter.addWidget(explorer_frame)
         main_splitter.addWidget(viewer_frame)
         main_splitter.addWidget(cache_frame)
         main_splitter.setSizes([350, 750, 300])
         self.on_cache_selection_changed() # Set initial state
+        
+        self.setStatusBar(QStatusBar(self))
+        self.file_watcher.directoryChanged.connect(self.on_directory_changed)
 
     # --- Library Management ---
     def add_library(self):
@@ -489,43 +619,79 @@ class MainWindow(QMainWindow):
                 self.populate_libraries()
 
     def populate_libraries(self):
+        if self.library_scanner and self.library_scanner.isRunning():
+            return # Scan already in progress
+
+        if self.file_watcher.directories():
+            self.file_watcher.removePaths(self.file_watcher.directories())
+
+        self.tree_view.setModel(None)
+
         self.library_model.clear()
         self.library_model.setHorizontalHeaderLabels(['Asset Libraries'])
-        root_node = self.library_model.invisibleRootItem()
-        for path in self.library_paths:
-            if os.path.isdir(path):
-                lib_item = QStandardItem(f"📁 {os.path.basename(path)}")
-                lib_item.setData(path, Qt.UserRole)
-                lib_item.setEditable(False)
-                root_node.appendRow(lib_item)
-                self.populate_directory(lib_item, path)
+        self.path_to_item_map.clear()
+        self.path_to_item_map[None] = self.library_model.invisibleRootItem()
 
-    def populate_directory(self, parent_item, dir_path):
-        try:
-            for entry in os.scandir(dir_path):
-                item = QStandardItem(entry.name)
-                item.setData(entry.path, Qt.UserRole)
-                item.setEditable(False)
-                if entry.is_dir():
-                    item.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
-                    parent_item.appendRow(item)
-                    self.populate_directory(item, entry.path)
+        self.btn_add_library.setEnabled(False)
+        self.btn_remove_library.setEnabled(False)
+        self.statusBar().showMessage("Scanning libraries...")
+        
+        self.library_scanner = LibraryScanner(self.library_paths)
+        self.library_scanner.directoryFound.connect(self.add_to_watcher)
+        self.library_scanner.errorOccurred.connect(self.show_status_error)
+        self.library_scanner.scanFinished.connect(self.on_scan_finished)
+        self.library_scanner.start()
+
+    @Slot(str)
+    def add_to_watcher(self, path):
+        self.file_watcher.addPath(path)
+
+    @Slot(str)
+    def on_directory_changed(self, path):
+        # Debounce refreshes to handle multiple rapid changes
+        self.refresh_timer.start(500)
+        
+    @Slot(str)
+    def show_status_error(self, message):
+        self.statusBar().showMessage(f"Error: {message}", 5000)
+
+    @Slot(list)
+    def on_scan_finished(self, items_to_add):
+        # This single slot now populates the entire model, ensuring correct order.
+        for parent_path, item_name, item_path, is_dir in items_to_add:
+            parent_item = self.path_to_item_map.get(parent_path, self.library_model.invisibleRootItem())
+            
+            item = QStandardItem(item_name)
+            item.setData(item_path, Qt.UserRole)
+            item.setEditable(False)
+
+            if is_dir:
+                item.setIcon(self.style().standardIcon(QStyle.SP_DirIcon))
+            else:
+                file_lower = item_name.lower()
+                is_video = any(file_lower.endswith(ext) for ext in self.VIDEO_EXTENSIONS)
+                is_audio = any(file_lower.endswith(ext) for ext in self.AUDIO_EXTENSIONS)
+
+                if is_video:
+                    item.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
+                    if self.ffmpeg_path: self.request_thumbnail(item, item_path)
+                elif is_audio:
+                    item.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
                 else:
-                    file_lower = entry.name.lower()
-                    is_video = any(file_lower.endswith(ext) for ext in self.VIDEO_EXTENSIONS)
-                    is_audio = any(file_lower.endswith(ext) for ext in self.AUDIO_EXTENSIONS)
-
-                    if is_video:
-                        item.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
-                        if self.ffmpeg_path: self.request_thumbnail(item, entry.path)
-                    elif is_audio:
-                        item.setIcon(self.style().standardIcon(QStyle.SP_MediaVolume))
-                    else:
-                        item.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
-                    
-                    parent_item.appendRow(item)
-
-        except OSError as e: print(f"Error scanning directory {dir_path}: {e}")
+                    item.setIcon(self.style().standardIcon(QStyle.SP_FileIcon))
+            
+            parent_item.appendRow(item)
+            if is_dir:
+                self.path_to_item_map[item_path] = item
+                
+        self.tree_view.setModel(self.proxy_model)
+        self.tree_view.setSortingEnabled(True)
+        self.proxy_model.sort(0, Qt.AscendingOrder)
+        
+        self.statusBar().showMessage("Scan complete.", 3000)
+        self.btn_add_library.setEnabled(True)
+        self.btn_remove_library.setEnabled(True)
+        self.library_scanner = None # Allow a new scan
 
     # --- Thumbnail Generation ---
     def request_thumbnail(self, item, media_path):
@@ -535,6 +701,7 @@ class MainWindow(QMainWindow):
         
         worker = ThumbnailGenerator(item, media_path, thumb_path, self.ffmpeg_path)
         worker.thumbnailReady.connect(self.on_thumbnail_ready)
+        worker.errorOccurred.connect(self.show_status_error)
         self.thumbnail_workers.append(worker)
         worker.start()
 
@@ -564,6 +731,10 @@ class MainWindow(QMainWindow):
         item = selected_items[0]
         
         old_path = item.data(Qt.UserRole)
+        
+        if self.current_media_path == old_path:
+            self.clear_player_state()
+
         old_name = os.path.basename(old_path)
         
         new_name, ok = QInputDialog.getText(self, "Rename File", "Enter new name:", QLineEdit.Normal, old_name)
@@ -681,6 +852,11 @@ class MainWindow(QMainWindow):
             self.media_player.play()
         self.was_playing_before_drag = False
 
+    @Slot()
+    def on_trim_range_changed(self):
+        self.loop_checkbox.setChecked(True)
+        self.media_player.setPosition(self.start_time_ms)
+        self.media_player.play()
 
     def format_time(self, ms):
         if ms < 0: ms = 0
@@ -709,6 +885,7 @@ class MainWindow(QMainWindow):
             self.start_time_ms = pos
             self.position_slider.setStartMarker(pos)
             self.time_edit_start.setText(self.format_time(pos))
+            self.on_trim_range_changed()
 
     def set_end_time_from_playhead(self):
         pos = self.media_player.position()
@@ -716,6 +893,7 @@ class MainWindow(QMainWindow):
             self.end_time_ms = pos
             self.position_slider.setEndMarker(pos)
             self.time_edit_end.setText(self.format_time(pos))
+            self.on_trim_range_changed()
 
     @Slot(int)
     def set_start_time_from_slider(self, value):
@@ -735,6 +913,7 @@ class MainWindow(QMainWindow):
         if new_start_ms is not None and new_start_ms < self.end_time_ms:
             self.start_time_ms = new_start_ms
             self.position_slider.setStartMarker(new_start_ms)
+            self.on_trim_range_changed()
         else:
             self.time_edit_start.setText(self.format_time(self.start_time_ms))
     
@@ -744,6 +923,7 @@ class MainWindow(QMainWindow):
         if new_end_ms is not None and new_end_ms > self.start_time_ms:
             self.end_time_ms = new_end_ms
             self.position_slider.setEndMarker(new_end_ms)
+            self.on_trim_range_changed()
         else:
             self.time_edit_end.setText(self.format_time(self.end_time_ms))
 
@@ -758,6 +938,35 @@ class MainWindow(QMainWindow):
             self.media_player.setPosition(max(0, current_pos - frame_duration_ms))
         else:
             super().keyPressEvent(event)
+            
+    @Slot(int)
+    def set_volume(self, value):
+        self.volume = value
+        self.audio_output.setVolume(value / 100.0)
+
+    def closeEvent(self, event):
+        self.save_config()
+        super().closeEvent(event)
+        
+    def open_library_context_menu(self, position):
+        menu = QMenu()
+        sort_by_name = QAction("Sort by Name", self)
+        sort_by_name.triggered.connect(lambda: self.sort_library("name"))
+        sort_by_date = QAction("Sort by Date", self)
+        sort_by_date.triggered.connect(lambda: self.sort_library("date"))
+        sort_by_type = QAction("Sort by Type", self)
+        sort_by_type.triggered.connect(lambda: self.sort_library("type"))
+        
+        menu.addAction(sort_by_name)
+        menu.addAction(sort_by_date)
+        menu.addAction(sort_by_type)
+        
+        menu.exec(self.tree_view.viewport().mapToGlobal(position))
+
+    def sort_library(self, key):
+        self.proxy_model.set_sort_key(key)
+        self.proxy_model.sort(0, Qt.AscendingOrder)
+
 
     def trim_media(self):
         if not self.current_media_path: return
@@ -820,6 +1029,27 @@ class MainWindow(QMainWindow):
         QCheckBox::indicator { width: 18px; height: 18px; border-radius: 4px; }
         QCheckBox::indicator:unchecked { background-color: #3c3f41; border: 1px solid #777777; }
         QCheckBox::indicator:checked { background-color: #007acc; border: 1px solid #005f9e; }
+        QSlider::groove:horizontal {
+            border: 1px solid #555555;
+            height: 4px;
+            background: #4f4f4f;
+            margin: 2px 0;
+            border-radius: 2px;
+        }
+        QSlider::handle:horizontal {
+            background: #dcdcdc;
+            border: 1px solid #555555;
+            width: 16px;
+            margin: -6px 0;
+            border-radius: 8px;
+        }
+        QSlider::sub-page:horizontal {
+            background: #007acc;
+            border: 1px solid #555555;
+            height: 4px;
+            border-radius: 2px;
+        }
+        QStatusBar { background-color: #3c3f41; color: #dcdcdc; }
         """
 # --- Application Entry Point ---
 if __name__ == '__main__':
@@ -827,5 +1057,3 @@ if __name__ == '__main__':
     window = MainWindow()
     window.show()
     sys.exit(app.exec())
-
-  
