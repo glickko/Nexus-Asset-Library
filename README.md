@@ -9,7 +9,8 @@ XYZ Asset Fusion is a flagship application from the **XYZ Project**, my self pro
 </p>
 
 ## Core Features
-*   **Fast Drag & Drop, Trim:** Usable for Video Editor, Sound Editor and Other App Supporting Drag & Drop. 
+*   **Fast Drag & Drop, Trim:** Usable for Video Editor, Sound Editor and Other App Supporting Drag & Drop.
+*   **Anime Themes:** Chainsaw-Man Reze Color Scheme. 
 *   **Professional Glass Pane UI:** A beautiful, modern interface that floats on your desktop.
 *   **Multi-Library Asset Browser:** Browse and search multiple media folders in one unified view.
 *   **Instant Media Preview:** Double-click any audio or video file for immediate playback and preview.
@@ -32,4 +33,5 @@ All your trimmed clips, thumbnails, and the application's log file are stored se
 `Your Documents Folder\XYZ Project\XYZ Asset Fusion\`
 
 ---
+
 
