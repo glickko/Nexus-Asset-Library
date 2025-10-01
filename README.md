@@ -1,39 +1,34 @@
-# XYZ Asset Fusion
+# <img src="icon.png" width="48" alt="XYZ Asset Fusion Icon"> XYZ Asset Fusion
 
-Your synergistic partner for rapid media trimming and asset management.
+> A professional media asset browser with powerful trimming and caching capabilities for editors and creators.
+
+XYZ Asset Fusion is a flagship application from the **XYZ Project**, my self project to doing anything more efficient. It is provided as a standalone, portable `.exe` that requires no installation.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/glickko/XYZ-Asset-Fusion/refs/heads/main/ss.png" alt="XYZ Asset Fusion Screenshot" width="800">
-  <br>
-  <em>A screenshot of the XYZ Asset Fusion application in action.</em>
-  <br><br>
-  <a href="https://ko-fi.com/glickko" target="_blank">
-    <img height="36" style="border:0px;height:36px;" src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Buy Me a Coffee at ko-fi.com" />
-  </a>
+  <img src="ss.png" alt="XYZ Asset Fusion Screenshot" width="800">
 </p>
 
----
+## Core Features
 
-## Features
-
-XYZ Asset Fusion is designed to accelerate your editing workflow by making asset preparation seamless and intuitive.
-
-* **Central Asset Library:** Add all your project folders to view and manage your media files in one place.
-* **Real-time Visual Trimming:** Quickly select the perfect in and out points for your clips using a responsive timeline and live-preview looping.
-* **Effortless Drag & Drop Workflow:** Drag assets directly from the library or your trimmed clips from the cache into your favorite video editor (e.g., Premiere Pro, DaVinci Resolve, Vegas Pro).
-* **Instant Caching:** Save trimmed clips as new, ready-to-use-files with a single click.
-* **Quick Search:** Instantly find the asset you need with a simple search filter.
+*   **Professional Glass Pane UI:** A beautiful, modern interface that floats on your desktop.
+*   **Multi-Library Asset Browser:** Browse and search multiple media folders in one unified view.
+*   **Instant Media Preview:** Double-click any audio or video file for immediate playback and preview.
+*   **Frame-Accurate Trimming:** Use the pro-grade slider to precisely select start and end points for your clips.
+*   **Non-Destructive Caching:** Trimmed clips are saved as new files in a dedicated cache, leaving your original source files untouched.
+*   **Standalone & Portable:** A single executable file that runs on any modern Windows machine. No installation needed.
 
 ## How to Use
 
-The workflow is designed to be fast and simple, getting you from raw footage to a trimmed clip on your timeline in seconds.
+The workflow is designed to be simple and intuitive for a fast turnaround:
 
-1.  **Add a Library:** Click the `Add Library` button to scan a folder containing your video or audio files.
-2.  **Load a Clip:** Double-click any file in the "Asset Libraries" panel to load it into the player.
-3.  **Trim Your Asset:**
-    * Play the media to your desired start point and click the `Set Start [` button.
-    * Continue playing to your desired end point and click the `Set End ]` button.
-    * The player will automatically loop your selection for a perfect real-time preview.
-4.  **Save to Cache:** Click the `Apply Trim and Cache` button. Your trimmed clip is immediately saved as a new file.
-5.  **Drag to Your Editor:** Your new clip will appear at the top of the "Processed Cache" list. **Simply drag it from this list and drop it directly into your video editor's timeline.**
+1.  **Add a Library:** Launch the application and click `Add Library`. Select a folder on your computer that contains your video or audio assets.
+2.  **Browse and Select:** Your media will appear in the library panel. Double-click any file to load it into the previewer.
+3.  **Trim Your Asset:** Use the playback controls and the professional trim slider to define the exact portion of the media you want to clip. Click `Apply Trim and Cache`.
+4.  **Use Your Cached Clip:** Your new, trimmed clip will appear in the "Processed Cache" panel on the right. You can now drag and drop it directly from the application into your video editor or any other folder.
 
+### Where Your Files Are Stored
+
+All your trimmed clips, thumbnails, and the application's log file are stored securely and automatically in a dedicated folder within your user's Documents directory:
+`Your Documents Folder\XYZ Project\XYZ Asset Fusion\`
+
+---
